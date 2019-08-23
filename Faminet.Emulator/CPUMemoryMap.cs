@@ -21,34 +21,40 @@ namespace Faminet.Emulator
             this.prgRom = prgRom;
         }
 
-        public byte this[ushort addr]
+        public byte Read(ushort addr)
         {
-            get
-            {
-                if (addr <= 0x1FFF)
-                    return ram[addr % 0x0800];
-                else if (addr <= 0x3FFF)
-                    return ppuReg[addr % 0x0008];           // TODO: Special PPU read handling
-                else if (addr <= 0x4017)
-                    return apuIoReg[addr - 0x4000];         // TODO: Special APU/IO read handling
-                else if (addr >= 0x8000)
-                    return prgRom[addr % prgRom.Length];
-                else
-                    throw new IndexOutOfRangeException();
-            }
-            set
-            {
-                if (addr <= 0x1FFF)
-                    ram[addr % 0x0800] = value;
-                else if (addr <= 0x3FFF)
-                    ppuReg[addr % 0x0008] = value;          // TODO: Special PPU write handling
-                else if (addr <= 0x4017)
-                    apuIoReg[addr - 0x4000] = value;        // TODO: Special APU/IO write handling
-                else if (addr >= 0x8000)
-                    throw new IndexOutOfRangeException();   // PRG ROM is readonly
-                else
-                    throw new IndexOutOfRangeException();
-            }
+            // TODO: Side effects from reading PPU/APU/IO ports
+            return Peek(addr);
+        }
+
+        public byte Peek(ushort addr)
+        {
+            if (addr <= 0x1FFF)
+                return ram[addr % 0x0800];
+            else if (addr <= 0x3FFF)
+                return ppuReg[addr % 0x0008];
+            else if (addr <= 0x4017)
+                return apuIoReg[addr - 0x4000];
+            else if (addr >= 0x8000)
+                return prgRom[addr % prgRom.Length];
+            else
+                throw new IndexOutOfRangeException();
+        }
+        public byte Peek(ushort addr, int offset) => Peek((ushort)(addr + offset));
+
+
+        public void Write(ushort addr, byte b)
+        {
+            if (addr <= 0x1FFF)
+                ram[addr % 0x0800] = b;
+            else if (addr <= 0x3FFF)
+                ppuReg[addr % 0x0008] = b;              // TODO: Special PPU write handling
+            else if (addr <= 0x4017)
+                apuIoReg[addr - 0x4000] = b;            // TODO: Special APU/IO write handling
+            else if (addr >= 0x8000)
+                throw new IndexOutOfRangeException();   // PRG ROM is readonly
+            else
+                throw new IndexOutOfRangeException();
         }
     }
 }

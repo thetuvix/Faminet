@@ -18,7 +18,7 @@ namespace Faminet.Emulator
             CPU = new CPU(Memory);
         }
 
-        public void Start()
+        public void Run()
         {
             bool halt;
             do
