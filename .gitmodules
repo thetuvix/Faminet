@@ -1,0 +1,3 @@
+[submodule "Faminet.Emulator.Tests/nes-test-roms"]
+	path = Faminet.Emulator.Tests/nes-test-roms
+	url = https://github.com/christopherpow/nes-test-roms.git

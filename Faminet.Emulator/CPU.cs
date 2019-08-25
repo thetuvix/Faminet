@@ -15,29 +15,40 @@ namespace Faminet.Emulator
         private byte S;     // Stack pointer
 
         // Processor status (P) flags:
-        private bool N;     private const byte NBit = 7;    // Negative flag
-        private bool V;     private const byte VBit = 6;    // Overflow flag
-                                                            // Bit 5 unused (always 1)
-                            private const byte BBit = 4;    // Break Command flag (1 for BRK/PHP, 0 for IRQ/NMI)
-        private bool D;                                     // Decimal Mode flag
-        private bool I;                                     // Interrupt Disable flag
-        private bool Z;                                     // Zero flag
-        private bool C;                                     // Carry flag
+        private bool N; private const byte NBit = 7;    // 7: Negative flag
+        private bool V; private const byte VBit = 6;    // 6: Overflow flag
+                                                        // 5: Bit 5 unused (always 1)
+                        private const byte BBit = 4;    // 4: Break Command flag (1 for BRK/PHP, 0 for IRQ/NMI)
+        private bool D;                                 // 3: Decimal Mode flag
+        private bool I;                                 // 2: Interrupt Disable flag
+        private bool Z;                                 // 1: Zero flag
+        private bool C;                                 // 0: Carry flag
         private byte P
         {
             get => (N, V, true, true, D, I, Z, C).AsBits();
             set => (N, V, _, _, D, I, Z, C) = value;
         }
+        private string PAsString => $"{N.AsLetter("N")}{V.AsLetter("V")}__" +
+                                    $"{D.AsLetter("D")}{I.AsLetter("I")}{Z.AsLetter("Z")}{C.AsLetter("C")}";
         private readonly CPUMemoryMap mem;
         public const ushort IRQAddr = 0xFFFE;
         public const ushort ResetAddr = 0xFFFC;
         public const ushort NMIAddr = 0xFFFA;
 
+        public Action<string> LogWriteAction { get; set; }
+
+        [Conditional("DEBUG")]
+        void LogDebugLine(string message)
+        {
+            Debug.WriteLine(message);
+            LogWriteAction?.Invoke(message);
+        }
+
         public CPU(CPUMemoryMap memoryMap)
         {
             mem = memoryMap;
 
-            P = 0b_00110100;    // nv_BdIzc
+            P = 0b_00110100;    // nv__dIzc
             A = X = Y = 0;
 
             Reset();
@@ -54,12 +65,12 @@ namespace Faminet.Emulator
 
         public void Jump(ushort addr) => PC = addr;
 
-        public void JumpIndirect(ushort addr) => Jump(FollowIndirectAddrRead(addr));
+        public void JumpIndirect(ushort addr) => Jump(FollowIndirectAbsoluteAddrRead(addr));
 
         public bool Step()
         {
-            //Debug.WriteLine($"PC: {PC:X4}  {Peek(PC, 0):X2} {Peek(PC, 1):X2} {Peek(PC, 2):X2} {Peek(PC, 3):X2}  A:{A:X2} X:{X:X2} Y:{Y:X2} S:{S:X2}");
-            Debug.WriteLine($"PC: {PC:X4}  {Disassemble(PC),-16}  A:{A:X2} X:{X:X2} Y:{Y:X2} S:{S:X2}");
+            //WriteDebugLine($"PC: {PC:X4}  {Peek(PC, 0):X2} {Peek(PC, 1):X2} {Peek(PC, 2):X2} {Peek(PC, 3):X2}  A:{A:X2} X:{X:X2} Y:{Y:X2} S:{S:X2}");
+            LogDebugLine($"{PC:X4}  {Disassemble(PC),-40}  A:{A:X2} X:{X:X2} Y:{Y:X2} P:{P.WithBit(BBit, false):X2} SP:{S:X2}");
 
             byte inst = ReadNextByte();
 
@@ -290,10 +301,7 @@ namespace Faminet.Emulator
                 case 0xB2:
                 case 0xD2:
                 case 0xF2:
-                    {
-                        Debug.WriteLine($"Unsupported opcode: {inst:X2} KIL");
-                        return true;
-                    }
+                    ReadImplied(); /* KIL */ return true;
 
                 case 0x1A:
                 case 0x3A:
@@ -301,12 +309,8 @@ namespace Faminet.Emulator
                 case 0x7A:
                 case 0xDA:
                 case 0xFA:
-                    {
-                        ReadImplied();
-                        Debug.WriteLine($"Unsupported opcode: {inst:X2}");
-                        break;
-                    }
-
+                    ReadImplied(); /* Unofficial */ break;
+                
                 case 0x0B:
                 case 0x2B:
                 case 0x4B:
@@ -320,11 +324,7 @@ namespace Faminet.Emulator
                 case 0xE2:
                 case 0x80:
                 case 0x89:
-                    {
-                        byte b = mem.Read(ReadImmediateAddr());
-                        Debug.WriteLine($"Unsupported opcode: {inst:X2} #${b:X2}");
-                        break;
-                    }
+                    mem.Read(ReadImmediateAddr()); /* Unofficial */ break;
 
                 case 0x07:
                 case 0x27:
@@ -337,11 +337,7 @@ namespace Faminet.Emulator
                 case 0x04:
                 case 0x44:
                 case 0x64:
-                    {
-                        ushort addr = ReadZeroPageAddr();
-                        Debug.WriteLine($"Unsupported opcode: {inst:X2} ${addr:X2}");
-                        break;
-                    }
+                    ReadZeroPageAddr(); /* Unofficial */ break;
 
                 case 0x17:
                 case 0x37:
@@ -355,19 +351,11 @@ namespace Faminet.Emulator
                 case 0x74:
                 case 0xD4:
                 case 0xF4:
-                    {
-                        ushort addr = ReadZeroPageXAddr();
-                        Debug.WriteLine($"Unsupported opcode: {inst:X2} ${addr:X2},X");
-                        break;
-                    }
+                    ReadZeroPageXAddr(); /* Unofficial */ break;
 
                 case 0x97:
                 case 0xB7:
-                    {
-                        ushort addr = ReadZeroPageYAddr();
-                        Debug.WriteLine($"Unsupported opcode: {inst:X2} ${addr:X2},Y");
-                        break;
-                    }
+                    ReadZeroPageYAddr(); /* Unofficial */ break;
 
                 case 0x03:
                 case 0x23:
@@ -377,11 +365,7 @@ namespace Faminet.Emulator
                 case 0xA3:
                 case 0xC3:
                 case 0xE3:
-                    {
-                        ushort addr = ReadIndexedIndirectXAddr();
-                        Debug.WriteLine($"Unsupported opcode: {inst:X2} (${addr:X2},X)");
-                        break;
-                    }
+                    ReadIndexedIndirectXAddr(); /* Unofficial */ break;
 
                 case 0x13:
                 case 0x33:
@@ -391,11 +375,7 @@ namespace Faminet.Emulator
                 case 0xB3:
                 case 0xD3:
                 case 0xF3:
-                    {
-                        ushort addr = ReadIndirectIndexedYAddr();
-                        Debug.WriteLine($"Unsupported opcode: {inst:X2} (${addr:X2}),Y");
-                        break;
-                    }
+                    ReadIndirectIndexedYAddr(); /* Unofficial */ break;
 
                 case 0x0F:
                 case 0x2F:
@@ -406,11 +386,7 @@ namespace Faminet.Emulator
                 case 0xCF:
                 case 0xEF:
                 case 0x0C:
-                    {
-                        ushort addr = ReadAbsoluteAddr();
-                        Debug.WriteLine($"Unsupported opcode: {inst:X2} ${addr:X4}");
-                        break;
-                    }
+                    ReadAbsoluteAddr(); /* Unofficial */ break;
 
                 case 0x1F:
                 case 0x3F:
@@ -425,11 +401,7 @@ namespace Faminet.Emulator
                 case 0x9C:
                 case 0xDC:
                 case 0xFC:
-                    {
-                        ushort addr = ReadAbsoluteXAddr();
-                        Debug.WriteLine($"Unsupported opcode: {inst:X2} ${addr:X4},X");
-                        break;
-                    }
+                    ReadAbsoluteXAddr(); /* Unofficial */ break;
 
                 case 0x1B:
                 case 0x3B:
@@ -442,11 +414,7 @@ namespace Faminet.Emulator
                 case 0x9F:
                 case 0xBF:
                 case 0x9E:
-                    {
-                        ushort addr = ReadAbsoluteYAddr();
-                        Debug.WriteLine($"Unsupported opcode: {inst:X2} ${addr:X4},Y");
-                        break;
-                    }
+                    ReadAbsoluteYAddr(); /* Unofficial */ break;
 
                 #endregion
 
@@ -457,6 +425,7 @@ namespace Faminet.Emulator
         }
 
         private ushort Addr(byte L, byte H, byte offset = 0) => (ushort)(L + (H << 8) + offset);
+        private ushort NextPageAddr(ushort addr) => (ushort)((addr & 0xFF00) + (byte)(addr + 1));
 
         private ushort StepNextAddr() => PC++;
         private byte ReadNextByte() => mem.Read(StepNextAddr());
@@ -471,18 +440,20 @@ namespace Faminet.Emulator
         private ushort ReadAbsoluteXAddr() => ReadAbsoluteAddr(X);
         private ushort ReadAbsoluteYAddr() => ReadAbsoluteAddr(Y);
 
-        private ushort ReadZeroPageAddr(byte offset) => (byte)(ReadNextByte() + offset);
-        private ushort ReadZeroPageAddr() => ReadZeroPageAddr(0);
-        private ushort ReadZeroPageXAddr() => ReadZeroPageAddr(X);
-        private ushort ReadZeroPageYAddr() => ReadZeroPageAddr(Y);
+        private byte ReadZeroPageAddr(byte offset) => (byte)(ReadNextByte() + offset);
+        private byte ReadZeroPageAddr() => ReadZeroPageAddr(0);
+        private byte ReadZeroPageXAddr() => ReadZeroPageAddr(X);
+        private byte ReadZeroPageYAddr() => ReadZeroPageAddr(Y);
 
-        private ushort ReadIndirectAddr() => FollowIndirectAddrRead(ReadAbsoluteAddr());
-        private ushort FollowIndirectAddrRead(ushort addr) => Addr(mem.Read(addr), mem.Read(++addr));
+        private ushort FollowIndirectAbsoluteAddrRead(ushort addr) => Addr(mem.Read(addr), mem.Read(NextPageAddr(addr)));   // 6502 bug: indirect wraps at page
+        private ushort FollowIndirectZeroPageAddrRead(byte addr) => Addr(mem.Read(addr), mem.Read((byte)(addr + 1)));
 
-        private ushort ReadIndexedIndirectAddr(byte offset) => FollowIndirectAddrRead(ReadZeroPageAddr(offset));
+        private ushort ReadIndirectAddr() => FollowIndirectAbsoluteAddrRead(ReadAbsoluteAddr());
+
+        private ushort ReadIndexedIndirectAddr(byte offset) => FollowIndirectZeroPageAddrRead(ReadZeroPageAddr(offset));
         private ushort ReadIndexedIndirectXAddr() => ReadIndexedIndirectAddr(X);
 
-        private ushort ReadIndirectIndexedAddr(byte offset) => (ushort)(FollowIndirectAddrRead(ReadZeroPageAddr()) + offset);
+        private ushort ReadIndirectIndexedAddr(byte offset) => (ushort)(FollowIndirectZeroPageAddrRead(ReadZeroPageAddr()) + offset);
         private ushort ReadIndirectIndexedYAddr() => ReadIndirectIndexedAddr(Y);
 
         private ushort ReadRelativeAddr() => (ushort)((sbyte)ReadNextByte() + PC);
@@ -692,14 +663,13 @@ namespace Faminet.Emulator
             LSR(ref M);
             mem.Write(addr, M);
         }
+        private void LSR(byte addr) => LSR((ushort)addr);
         private void LSR(ref byte r)
         {
             C = r.IsBitSet(0);
             r = (byte)(r >> 1);
-            SetZN(A);
+            SetZN(r);
         }
-        [Obsolete("Missing ref on register", true)]
-        private void LSR(byte r) { throw new InvalidOperationException(); }
 
         private void ASL(ushort addr)
         {
@@ -707,14 +677,13 @@ namespace Faminet.Emulator
             ASL(ref M);
             mem.Write(addr, M);
         }
+        private void ASL(byte addr) => ASL((ushort)addr);
         private void ASL(ref byte r)
         {
             C = r.IsBitSet(7);
             r = (byte)(r << 1);
-            SetZN(A);
+            SetZN(r);
         }
-        [Obsolete("Missing ref on register", true)]
-        private void ASL(byte r) { throw new InvalidOperationException(); }
 
         private void ROL(ushort addr)
         {
@@ -722,15 +691,14 @@ namespace Faminet.Emulator
             ROL(ref M);
             mem.Write(addr, M);
         }
+        private void ROL(byte addr) => ROL((ushort)addr);
         private void ROL(ref byte r)
         {
             bool oldC = C;
             C = r.IsBitSet(7);
             r = ((byte)(r << 1)).WithBit(0, oldC);
-            SetZN(A);
+            SetZN(r);
         }
-        [Obsolete("Missing ref on register", true)]
-        private void ROL(byte r) { throw new InvalidOperationException(); }
 
         private void ROR(ushort addr)
         {
@@ -738,15 +706,14 @@ namespace Faminet.Emulator
             ROR(ref M);
             mem.Write(addr, M);
         }
+        private void ROR(byte addr) => ROR((ushort)addr);
         private void ROR(ref byte r)
         {
             bool oldC = C;
             C = r.IsBitSet(0);
             r = ((byte)(r >> 1)).WithBit(7, oldC);
-            SetZN(A);
+            SetZN(r);
         }
-        [Obsolete("Missing ref on register", true)]
-        private void ROR(byte r) { throw new InvalidOperationException(); }
 
         private void INC(ushort addr)
         {
@@ -786,212 +753,212 @@ namespace Faminet.Emulator
             {
                 #region Accumulator and arithmetic
 
-                case 0xA9: return "LDA" + DisassembleImmediate(addr);
-                case 0xA5: return "LDA" + DisassembleZeroPage(addr);
-                case 0xB5: return "LDA" + DisassembleZeroPageX(addr);
-                case 0xAD: return "LDA" + DisassembleAbsolute(addr);
-                case 0xBD: return "LDA" + DisassembleAbsoluteX(addr);
-                case 0xB9: return "LDA" + DisassembleAbsoluteY(addr);
-                case 0xA1: return "LDA" + DisassembleIndexedIndirectX(addr);
-                case 0xB1: return "LDA" + DisassembleIndirectIndexedY(addr);
+                case 0xA9: return DisassembleImmediate(" LDA", addr);
+                case 0xA5: return DisassembleZeroPage(" LDA", addr) + LogZeroPageValue(addr);
+                case 0xB5: return DisassembleZeroPageX(" LDA", addr) + LogZeroPageXValue(addr);
+                case 0xAD: return DisassembleAbsolute(" LDA", addr) + LogAbsoluteValue(addr);
+                case 0xBD: return DisassembleAbsoluteX(" LDA", addr) + LogAbsoluteXValue(addr);
+                case 0xB9: return DisassembleAbsoluteY(" LDA", addr) + LogAbsoluteYValue(addr);
+                case 0xA1: return DisassembleIndexedIndirectX(" LDA", addr) + LogIndexedIndirectXValue(addr);
+                case 0xB1: return DisassembleIndirectIndexedY(" LDA", addr) + LogIndirectIndexedYValue(addr);
 
-                case 0xA2: return "LDX" + DisassembleImmediate(addr);
-                case 0xA6: return "LDX" + DisassembleZeroPage(addr);
-                case 0xB6: return "LDX" + DisassembleZeroPageY(addr);
-                case 0xAE: return "LDX" + DisassembleAbsolute(addr);
-                case 0xBE: return "LDX" + DisassembleAbsoluteY(addr);
+                case 0xA2: return DisassembleImmediate(" LDX", addr);
+                case 0xA6: return DisassembleZeroPage(" LDX", addr) + LogZeroPageValue(addr);
+                case 0xB6: return DisassembleZeroPageY(" LDX", addr) + LogZeroPageYValue(addr);
+                case 0xAE: return DisassembleAbsolute(" LDX", addr) + LogAbsoluteValue(addr);
+                case 0xBE: return DisassembleAbsoluteY(" LDX", addr) + LogAbsoluteYValue(addr);
 
-                case 0xA0: return "LDY" + DisassembleImmediate(addr);
-                case 0xA4: return "LDY" + DisassembleZeroPage(addr);
-                case 0xB4: return "LDY" + DisassembleZeroPageX(addr);
-                case 0xAC: return "LDY" + DisassembleAbsolute(addr);
-                case 0xBC: return "LDY" + DisassembleAbsoluteX(addr);
+                case 0xA0: return DisassembleImmediate(" LDY", addr);
+                case 0xA4: return DisassembleZeroPage(" LDY", addr) + LogZeroPageValue(addr);
+                case 0xB4: return DisassembleZeroPageX(" LDY", addr) + LogZeroPageXValue(addr);
+                case 0xAC: return DisassembleAbsolute(" LDY", addr) + LogAbsoluteValue(addr);
+                case 0xBC: return DisassembleAbsoluteX(" LDY", addr) + LogAbsoluteXValue(addr);
 
-                case 0x85: return "STA" + DisassembleZeroPage(addr);
-                case 0x95: return "STA" + DisassembleZeroPageX(addr);
-                case 0x8D: return "STA" + DisassembleAbsolute(addr);
-                case 0x9D: return "STA" + DisassembleAbsoluteX(addr);
-                case 0x99: return "STA" + DisassembleAbsoluteY(addr);
-                case 0x81: return "STA" + DisassembleIndexedIndirectX(addr);
-                case 0x91: return "STA" + DisassembleIndirectIndexedY(addr);
+                case 0x85: return DisassembleZeroPage(" STA", addr) + LogZeroPageValue(addr);
+                case 0x95: return DisassembleZeroPageX(" STA", addr) + LogZeroPageXValue(addr);
+                case 0x8D: return DisassembleAbsolute(" STA", addr) + LogAbsoluteValue(addr);
+                case 0x9D: return DisassembleAbsoluteX(" STA", addr) + LogAbsoluteXValue(addr);
+                case 0x99: return DisassembleAbsoluteY(" STA", addr) + LogAbsoluteYValue(addr);
+                case 0x81: return DisassembleIndexedIndirectX(" STA", addr) + LogIndexedIndirectXValue(addr);
+                case 0x91: return DisassembleIndirectIndexedY(" STA", addr) + LogIndirectIndexedYValue(addr);
 
-                case 0x86: return "STX" + DisassembleZeroPage(addr);
-                case 0x96: return "STX" + DisassembleZeroPageY(addr);
-                case 0x8E: return "STX" + DisassembleAbsolute(addr);
+                case 0x86: return DisassembleZeroPage(" STX", addr) + LogZeroPageValue(addr);
+                case 0x96: return DisassembleZeroPageY(" STX", addr) + LogZeroPageYValue(addr);
+                case 0x8E: return DisassembleAbsolute(" STX", addr) + LogAbsoluteValue(addr);
 
-                case 0x84: return "STY" + DisassembleZeroPage(addr);
-                case 0x94: return "STY" + DisassembleZeroPageX(addr);
-                case 0x8C: return "STY" + DisassembleAbsolute(addr);
+                case 0x84: return DisassembleZeroPage(" STY", addr) + LogZeroPageValue(addr);
+                case 0x94: return DisassembleZeroPageX(" STY", addr) + LogZeroPageXValue(addr);
+                case 0x8C: return DisassembleAbsolute(" STY", addr) + LogAbsoluteValue(addr);
 
-                case 0xAA: return "TAX" + DisassembleImplied();
-                case 0x8A: return "TXA" + DisassembleImplied();
-                case 0xA8: return "TAY" + DisassembleImplied();
-                case 0x98: return "TYA" + DisassembleImplied();
+                case 0xAA: return DisassembleImplied(" TAX", addr);
+                case 0x8A: return DisassembleImplied(" TXA", addr);
+                case 0xA8: return DisassembleImplied(" TAY", addr);
+                case 0x98: return DisassembleImplied(" TYA", addr);
 
-                case 0x69: return "ADC" + DisassembleImmediate(addr);
-                case 0x65: return "ADC" + DisassembleZeroPage(addr);
-                case 0x75: return "ADC" + DisassembleZeroPageX(addr);
-                case 0x6D: return "ADC" + DisassembleAbsolute(addr);
-                case 0x7D: return "ADC" + DisassembleAbsoluteX(addr);
-                case 0x79: return "ADC" + DisassembleAbsoluteY(addr);
-                case 0x61: return "ADC" + DisassembleIndexedIndirectX(addr);
-                case 0x71: return "ADC" + DisassembleIndirectIndexedY(addr);
+                case 0x69: return DisassembleImmediate(" ADC", addr);
+                case 0x65: return DisassembleZeroPage(" ADC", addr) + LogZeroPageValue(addr);
+                case 0x75: return DisassembleZeroPageX(" ADC", addr) + LogZeroPageXValue(addr);
+                case 0x6D: return DisassembleAbsolute(" ADC", addr) + LogAbsoluteValue(addr);
+                case 0x7D: return DisassembleAbsoluteX(" ADC", addr) + LogAbsoluteXValue(addr);
+                case 0x79: return DisassembleAbsoluteY(" ADC", addr) + LogAbsoluteYValue(addr);
+                case 0x61: return DisassembleIndexedIndirectX(" ADC", addr) + LogIndexedIndirectXValue(addr);
+                case 0x71: return DisassembleIndirectIndexedY(" ADC", addr) + LogIndirectIndexedYValue(addr);
 
-                case 0xE9: return "SBC" + DisassembleImmediate(addr);
-                case 0xE5: return "SBC" + DisassembleZeroPage(addr);
-                case 0xF5: return "SBC" + DisassembleZeroPageX(addr);
-                case 0xED: return "SBC" + DisassembleAbsolute(addr);
-                case 0xFD: return "SBC" + DisassembleAbsoluteX(addr);
-                case 0xF9: return "SBC" + DisassembleAbsoluteY(addr);
-                case 0xE1: return "SBC" + DisassembleIndexedIndirectX(addr);
-                case 0xF1: return "SBC" + DisassembleIndirectIndexedY(addr);
+                case 0xE9: return DisassembleImmediate(" SBC", addr);
+                case 0xE5: return DisassembleZeroPage(" SBC", addr) + LogZeroPageValue(addr);
+                case 0xF5: return DisassembleZeroPageX(" SBC", addr) + LogZeroPageXValue(addr);
+                case 0xED: return DisassembleAbsolute(" SBC", addr) + LogAbsoluteValue(addr);
+                case 0xFD: return DisassembleAbsoluteX(" SBC", addr) + LogAbsoluteXValue(addr);
+                case 0xF9: return DisassembleAbsoluteY(" SBC", addr) + LogAbsoluteYValue(addr);
+                case 0xE1: return DisassembleIndexedIndirectX(" SBC", addr) + LogIndexedIndirectXValue(addr);
+                case 0xF1: return DisassembleIndirectIndexedY(" SBC", addr) + LogIndirectIndexedYValue(addr);
 
-                case 0x29: return "AND" + DisassembleImmediate(addr);
-                case 0x25: return "AND" + DisassembleZeroPage(addr);
-                case 0x35: return "AND" + DisassembleZeroPageX(addr);
-                case 0x2D: return "AND" + DisassembleAbsolute(addr);
-                case 0x3D: return "AND" + DisassembleAbsoluteX(addr);
-                case 0x39: return "AND" + DisassembleAbsoluteY(addr);
-                case 0x21: return "AND" + DisassembleIndexedIndirectX(addr);
-                case 0x31: return "AND" + DisassembleIndirectIndexedY(addr);
+                case 0x29: return DisassembleImmediate(" AND", addr);
+                case 0x25: return DisassembleZeroPage(" AND", addr) + LogZeroPageValue(addr);
+                case 0x35: return DisassembleZeroPageX(" AND", addr) + LogZeroPageXValue(addr);
+                case 0x2D: return DisassembleAbsolute(" AND", addr) + LogAbsoluteValue(addr);
+                case 0x3D: return DisassembleAbsoluteX(" AND", addr) + LogAbsoluteXValue(addr);
+                case 0x39: return DisassembleAbsoluteY(" AND", addr) + LogAbsoluteYValue(addr);
+                case 0x21: return DisassembleIndexedIndirectX(" AND", addr) + LogIndexedIndirectXValue(addr);
+                case 0x31: return DisassembleIndirectIndexedY(" AND", addr) + LogIndirectIndexedYValue(addr);
 
-                case 0x09: return "ORA" + DisassembleImmediate(addr);
-                case 0x05: return "ORA" + DisassembleZeroPage(addr);
-                case 0x15: return "ORA" + DisassembleZeroPageX(addr);
-                case 0x0D: return "ORA" + DisassembleAbsolute(addr);
-                case 0x1D: return "ORA" + DisassembleAbsoluteX(addr);
-                case 0x19: return "ORA" + DisassembleAbsoluteY(addr);
-                case 0x01: return "ORA" + DisassembleIndexedIndirectX(addr);
-                case 0x11: return "ORA" + DisassembleIndirectIndexedY(addr);
+                case 0x09: return DisassembleImmediate(" ORA", addr);
+                case 0x05: return DisassembleZeroPage(" ORA", addr) + LogZeroPageValue(addr);
+                case 0x15: return DisassembleZeroPageX(" ORA", addr) + LogZeroPageXValue(addr);
+                case 0x0D: return DisassembleAbsolute(" ORA", addr) + LogAbsoluteValue(addr);
+                case 0x1D: return DisassembleAbsoluteX(" ORA", addr) + LogAbsoluteXValue(addr);
+                case 0x19: return DisassembleAbsoluteY(" ORA", addr) + LogAbsoluteYValue(addr);
+                case 0x01: return DisassembleIndexedIndirectX(" ORA", addr) + LogIndexedIndirectXValue(addr);
+                case 0x11: return DisassembleIndirectIndexedY(" ORA", addr) + LogIndirectIndexedYValue(addr);
 
-                case 0x49: return "EOR" + DisassembleImmediate(addr);
-                case 0x45: return "EOR" + DisassembleZeroPage(addr);
-                case 0x55: return "EOR" + DisassembleZeroPageX(addr);
-                case 0x4D: return "EOR" + DisassembleAbsolute(addr);
-                case 0x5D: return "EOR" + DisassembleAbsoluteX(addr);
-                case 0x59: return "EOR" + DisassembleAbsoluteY(addr);
-                case 0x41: return "EOR" + DisassembleIndexedIndirectX(addr);
-                case 0x51: return "EOR" + DisassembleIndirectIndexedY(addr);
+                case 0x49: return DisassembleImmediate(" EOR", addr);
+                case 0x45: return DisassembleZeroPage(" EOR", addr) + LogZeroPageValue(addr);
+                case 0x55: return DisassembleZeroPageX(" EOR", addr) + LogZeroPageXValue(addr);
+                case 0x4D: return DisassembleAbsolute(" EOR", addr) + LogAbsoluteValue(addr);
+                case 0x5D: return DisassembleAbsoluteX(" EOR", addr) + LogAbsoluteXValue(addr);
+                case 0x59: return DisassembleAbsoluteY(" EOR", addr) + LogAbsoluteYValue(addr);
+                case 0x41: return DisassembleIndexedIndirectX(" EOR", addr) + LogIndexedIndirectXValue(addr);
+                case 0x51: return DisassembleIndirectIndexedY(" EOR", addr) + LogIndirectIndexedYValue(addr);
 
                 #endregion
 
                 #region Flags and status register
 
-                case 0x38: return "SEC" + DisassembleImplied();
-                case 0x18: return "CLC" + DisassembleImplied();
+                case 0x38: return DisassembleImplied(" SEC", addr);
+                case 0x18: return DisassembleImplied(" CLC", addr);
 
-                case 0x78: return "SEI" + DisassembleImplied();
-                case 0x58: return "CLI" + DisassembleImplied();
+                case 0x78: return DisassembleImplied(" SEI", addr);
+                case 0x58: return DisassembleImplied(" CLI", addr);
 
-                case 0xF8: return "SED" + DisassembleImplied();
-                case 0xD8: return "CLD" + DisassembleImplied();
+                case 0xF8: return DisassembleImplied(" SED", addr);
+                case 0xD8: return DisassembleImplied(" CLD", addr);
 
-                case 0xB8: return "CLV" + DisassembleImplied();
+                case 0xB8: return DisassembleImplied(" CLV", addr);
 
                 #endregion
 
                 #region Tests, branches and jumps
 
-                case 0x4C: return "JMP" + DisassembleAbsolute(addr);
-                case 0x6C: return "JMP" + DisassembleIndirect(addr);
+                case 0x4C: return DisassembleAbsolute(" JMP", addr);
+                case 0x6C: return DisassembleIndirect(" JMP", addr) + LogIndirectValue(addr);
 
-                case 0x30: return "BMI" + DisassembleRelative(addr);
-                case 0x10: return "BPL" + DisassembleRelative(addr);
-                case 0x90: return "BCC" + DisassembleRelative(addr);
-                case 0xB0: return "BCS" + DisassembleRelative(addr);
-                case 0xF0: return "BEQ" + DisassembleRelative(addr);
-                case 0xD0: return "BNE" + DisassembleRelative(addr);
-                case 0x70: return "BVS" + DisassembleRelative(addr);
-                case 0x50: return "BVC" + DisassembleRelative(addr);
+                case 0x30: return DisassembleRelative(" BMI", addr);
+                case 0x10: return DisassembleRelative(" BPL", addr);
+                case 0x90: return DisassembleRelative(" BCC", addr);
+                case 0xB0: return DisassembleRelative(" BCS", addr);
+                case 0xF0: return DisassembleRelative(" BEQ", addr);
+                case 0xD0: return DisassembleRelative(" BNE", addr);
+                case 0x70: return DisassembleRelative(" BVS", addr);
+                case 0x50: return DisassembleRelative(" BVC", addr);
 
-                case 0xC9: return "CMP" + DisassembleImmediate(addr);
-                case 0xC5: return "CMP" + DisassembleZeroPage(addr);
-                case 0xD5: return "CMP" + DisassembleZeroPageX(addr);
-                case 0xCD: return "CMP" + DisassembleAbsolute(addr);
-                case 0xDD: return "CMP" + DisassembleAbsoluteX(addr);
-                case 0xD9: return "CMP" + DisassembleAbsoluteY(addr);
-                case 0xC1: return "CMP" + DisassembleIndexedIndirectX(addr);
-                case 0xD1: return "CMP" + DisassembleIndirectIndexedY(addr);
+                case 0xC9: return DisassembleImmediate(" CMP", addr);
+                case 0xC5: return DisassembleZeroPage(" CMP", addr) + LogZeroPageValue(addr);
+                case 0xD5: return DisassembleZeroPageX(" CMP", addr) + LogZeroPageXValue(addr);
+                case 0xCD: return DisassembleAbsolute(" CMP", addr) + LogAbsoluteValue(addr);
+                case 0xDD: return DisassembleAbsoluteX(" CMP", addr) + LogAbsoluteXValue(addr);
+                case 0xD9: return DisassembleAbsoluteY(" CMP", addr) + LogAbsoluteYValue(addr);
+                case 0xC1: return DisassembleIndexedIndirectX(" CMP", addr) + LogIndexedIndirectXValue(addr);
+                case 0xD1: return DisassembleIndirectIndexedY(" CMP", addr) + LogIndirectIndexedYValue(addr);
 
-                case 0xE0: return "CPX" + DisassembleImmediate(addr);
-                case 0xE4: return "CPX" + DisassembleZeroPage(addr);
-                case 0xEC: return "CPX" + DisassembleAbsolute(addr);
+                case 0xE0: return DisassembleImmediate(" CPX", addr);
+                case 0xE4: return DisassembleZeroPage(" CPX", addr) + LogZeroPageValue(addr);
+                case 0xEC: return DisassembleAbsolute(" CPX", addr) + LogAbsoluteValue(addr);
 
-                case 0xC0: return "CPY" + DisassembleImmediate(addr);
-                case 0xC4: return "CPY" + DisassembleZeroPage(addr);
-                case 0xCC: return "CPY" + DisassembleAbsolute(addr);
+                case 0xC0: return DisassembleImmediate(" CPY", addr);
+                case 0xC4: return DisassembleZeroPage(" CPY", addr) + LogZeroPageValue(addr);
+                case 0xCC: return DisassembleAbsolute(" CPY", addr) + LogAbsoluteValue(addr);
 
-                case 0x24: return "BIT" + DisassembleZeroPage(addr);
-                case 0x2C: return "BIT" + DisassembleAbsolute(addr);
+                case 0x24: return DisassembleZeroPage(" BIT", addr) + LogZeroPageValue(addr);
+                case 0x2C: return DisassembleAbsolute(" BIT", addr) + LogAbsoluteValue(addr);
 
                 #endregion
 
                 #region Stack processing
 
-                case 0x20: return "JSR" + DisassembleAbsolute(addr);
-                case 0x60: return "RTS" + DisassembleImplied();
+                case 0x20: return DisassembleAbsolute(" JSR", addr);
+                case 0x60: return DisassembleImplied(" RTS", addr);
 
-                case 0x48: return "PHA" + DisassembleImplied();
-                case 0x68: return "PLA" + DisassembleImplied();
+                case 0x48: return DisassembleImplied(" PHA", addr);
+                case 0x68: return DisassembleImplied(" PLA", addr);
 
-                case 0x9A: return "TXS" + DisassembleImplied();
-                case 0xBA: return "TSX" + DisassembleImplied();
+                case 0x9A: return DisassembleImplied(" TXS", addr);
+                case 0xBA: return DisassembleImplied(" TSX", addr);
 
-                case 0x08: return "PHP" + DisassembleImplied();
-                case 0x28: return "PLP" + DisassembleImplied();
+                case 0x08: return DisassembleImplied(" PHP", addr);
+                case 0x28: return DisassembleImplied(" PLP", addr);
 
                 #endregion
 
                 #region Interrupts
 
-                case 0x40: return "RTI" + DisassembleImplied();
-                case 0x00: return "BRK" + DisassembleImplied();
+                case 0x40: return DisassembleImplied(" RTI", addr);
+                case 0x00: return DisassembleImplied(" BRK", addr);
 
                 #endregion
 
                 #region Shift and memory modification
 
-                case 0x4A: return "LSR" + DisassembleAccumulator(addr);
-                case 0x46: return "LSR" + DisassembleZeroPage(addr);
-                case 0x56: return "LSR" + DisassembleZeroPageX(addr);
-                case 0x4E: return "LSR" + DisassembleAbsolute(addr);
-                case 0x5E: return "LSR" + DisassembleAbsoluteX(addr);
+                case 0x4A: return DisassembleAccumulator(" LSR", addr);
+                case 0x46: return DisassembleZeroPage(" LSR", addr) + LogZeroPageValue(addr);
+                case 0x56: return DisassembleZeroPageX(" LSR", addr) + LogZeroPageXValue(addr);
+                case 0x4E: return DisassembleAbsolute(" LSR", addr) + LogAbsoluteValue(addr);
+                case 0x5E: return DisassembleAbsoluteX(" LSR", addr) + LogAbsoluteXValue(addr);
 
-                case 0x0A: return "ASL" + DisassembleAccumulator(addr);
-                case 0x06: return "ASL" + DisassembleZeroPage(addr);
-                case 0x16: return "ASL" + DisassembleZeroPageX(addr);
-                case 0x0E: return "ASL" + DisassembleAbsolute(addr);
-                case 0x1E: return "ASL" + DisassembleAbsoluteX(addr);
+                case 0x0A: return DisassembleAccumulator(" ASL", addr);
+                case 0x06: return DisassembleZeroPage(" ASL", addr) + LogZeroPageValue(addr);
+                case 0x16: return DisassembleZeroPageX(" ASL", addr) + LogZeroPageXValue(addr);
+                case 0x0E: return DisassembleAbsolute(" ASL", addr) + LogAbsoluteValue(addr);
+                case 0x1E: return DisassembleAbsoluteX(" ASL", addr) + LogAbsoluteXValue(addr);
 
-                case 0x2A: return "ROL" + DisassembleAccumulator(addr);
-                case 0x26: return "ROL" + DisassembleZeroPage(addr);
-                case 0x36: return "ROL" + DisassembleZeroPageX(addr);
-                case 0x2E: return "ROL" + DisassembleAbsolute(addr);
-                case 0x3E: return "ROL" + DisassembleAbsoluteX(addr);
+                case 0x2A: return DisassembleAccumulator(" ROL", addr);
+                case 0x26: return DisassembleZeroPage(" ROL", addr) + LogZeroPageValue(addr);
+                case 0x36: return DisassembleZeroPageX(" ROL", addr) + LogZeroPageXValue(addr);
+                case 0x2E: return DisassembleAbsolute(" ROL", addr) + LogAbsoluteValue(addr);
+                case 0x3E: return DisassembleAbsoluteX(" ROL", addr) + LogAbsoluteXValue(addr);
 
-                case 0x6A: return "ROR" + DisassembleAccumulator(addr);
-                case 0x66: return "ROR" + DisassembleZeroPage(addr);
-                case 0x76: return "ROR" + DisassembleZeroPageX(addr);
-                case 0x6E: return "ROR" + DisassembleAbsolute(addr);
-                case 0x7E: return "ROR" + DisassembleAbsoluteX(addr);
+                case 0x6A: return DisassembleAccumulator(" ROR", addr);
+                case 0x66: return DisassembleZeroPage(" ROR", addr) + LogZeroPageValue(addr);
+                case 0x76: return DisassembleZeroPageX(" ROR", addr) + LogZeroPageXValue(addr);
+                case 0x6E: return DisassembleAbsolute(" ROR", addr) + LogAbsoluteValue(addr);
+                case 0x7E: return DisassembleAbsoluteX(" ROR", addr) + LogAbsoluteXValue(addr);
 
-                case 0xE6: return "INC" + DisassembleZeroPage(addr);
-                case 0xF6: return "INC" + DisassembleZeroPageX(addr);
-                case 0xEE: return "INC" + DisassembleAbsolute(addr);
-                case 0xFE: return "INC" + DisassembleAbsoluteX(addr);
+                case 0xE6: return DisassembleZeroPage(" INC", addr) + LogZeroPageValue(addr);
+                case 0xF6: return DisassembleZeroPageX(" INC", addr) + LogZeroPageXValue(addr);
+                case 0xEE: return DisassembleAbsolute(" INC", addr) + LogAbsoluteValue(addr);
+                case 0xFE: return DisassembleAbsoluteX(" INC", addr) + LogAbsoluteXValue(addr);
 
-                case 0xE8: return "INX" + DisassembleImplied();
-                case 0xC8: return "INY" + DisassembleImplied();
+                case 0xE8: return DisassembleImplied(" INX", addr);
+                case 0xC8: return DisassembleImplied(" INY", addr);
 
-                case 0xC6: return "DEC" + DisassembleZeroPage(addr);
-                case 0xD6: return "DEC" + DisassembleZeroPageX(addr);
-                case 0xCE: return "DEC" + DisassembleAbsolute(addr);
-                case 0xDE: return "DEC" + DisassembleAbsoluteX(addr);
+                case 0xC6: return DisassembleZeroPage(" DEC", addr) + LogZeroPageValue(addr);
+                case 0xD6: return DisassembleZeroPageX(" DEC", addr) + LogZeroPageXValue(addr);
+                case 0xCE: return DisassembleAbsolute(" DEC", addr) + LogAbsoluteValue(addr);
+                case 0xDE: return DisassembleAbsoluteX(" DEC", addr) + LogAbsoluteXValue(addr);
 
-                case 0xCA: return "DEX" + DisassembleImplied();
-                case 0x88: return "DEY" + DisassembleImplied();
+                case 0xCA: return DisassembleImplied(" DEX", addr);
+                case 0x88: return DisassembleImplied(" DEY", addr);
 
-                case 0xEA: return "NOP" + DisassembleImplied();
+                case 0xEA: return DisassembleImplied(" NOP", addr);
 
                 #endregion
 
@@ -1009,7 +976,7 @@ namespace Faminet.Emulator
                 case 0xB2:
                 case 0xD2:
                 case 0xF2:
-                    return "KIL" + DisassembleImplied();
+                    return DisassembleImplied(" KIL", addr);
 
                 case 0x1A:
                 case 0x3A:
@@ -1017,7 +984,7 @@ namespace Faminet.Emulator
                 case 0x7A:
                 case 0xDA:
                 case 0xFA:
-                    return $"{inst:X2}" + DisassembleImplied();
+                    return DisassembleImplied("****", addr);
 
                 case 0x0B:
                 case 0x2B:
@@ -1032,7 +999,7 @@ namespace Faminet.Emulator
                 case 0xE2:
                 case 0x80:
                 case 0x89:
-                    return $"{inst:X2}" + DisassembleImmediate(addr);
+                    return DisassembleImmediate("****", addr);
 
                 case 0x07:
                 case 0x27:
@@ -1045,7 +1012,7 @@ namespace Faminet.Emulator
                 case 0x04:
                 case 0x44:
                 case 0x64:
-                    return $"{inst:X2}" + DisassembleZeroPage(addr);
+                    return DisassembleZeroPage("****", addr);
 
                 case 0x17:
                 case 0x37:
@@ -1059,11 +1026,11 @@ namespace Faminet.Emulator
                 case 0x74:
                 case 0xD4:
                 case 0xF4:
-                    return $"{inst:X2}" + DisassembleZeroPageX(addr);
+                    return DisassembleZeroPageX("****", addr);
 
                 case 0x97:
                 case 0xB7:
-                    return $"{inst:X2}" + DisassembleZeroPageY(addr);
+                    return DisassembleZeroPageY("****", addr);
 
                 case 0x03:
                 case 0x23:
@@ -1073,7 +1040,7 @@ namespace Faminet.Emulator
                 case 0xA3:
                 case 0xC3:
                 case 0xE3:
-                    return $"{inst:X2}" + DisassembleIndexedIndirectX(addr);
+                    return DisassembleIndexedIndirectX("****", addr);
 
                 case 0x13:
                 case 0x33:
@@ -1083,7 +1050,7 @@ namespace Faminet.Emulator
                 case 0xB3:
                 case 0xD3:
                 case 0xF3:
-                    return $"{inst:X2}" + DisassembleIndirectIndexedY(addr);
+                    return DisassembleIndirectIndexedY("****", addr);
 
                 case 0x0F:
                 case 0x2F:
@@ -1094,7 +1061,7 @@ namespace Faminet.Emulator
                 case 0xCF:
                 case 0xEF:
                 case 0x0C:
-                    return $"{inst:X2}" + DisassembleAbsolute(addr);
+                    return DisassembleAbsolute("****", addr);
 
                 case 0x1F:
                 case 0x3F:
@@ -1109,7 +1076,7 @@ namespace Faminet.Emulator
                 case 0x9C:
                 case 0xDC:
                 case 0xFC:
-                    return $"{inst:X2}" + DisassembleAbsoluteX(addr);
+                    return DisassembleAbsoluteX("****", addr);
 
                 case 0x1B:
                 case 0x3B:
@@ -1122,7 +1089,7 @@ namespace Faminet.Emulator
                 case 0x9F:
                 case 0xBF:
                 case 0x9E:
-                    return $"{inst:X2}" + DisassembleAbsoluteY(addr);
+                    return DisassembleAbsoluteY("****", addr);
 
                 #endregion
 
@@ -1130,24 +1097,50 @@ namespace Faminet.Emulator
             }
         }
 
-        private string DisassembleImplied() => "";
-        private string DisassembleImmediate(ushort instAddr) => $" #${PeekImmediateOperand(instAddr):X2}";
-        private string DisassembleAbsolute(ushort instAddr) => $" ${PeekAbsoluteOperand(instAddr):X4}";
-        private string DisassembleAbsoluteX(ushort instAddr) => $" ${PeekAbsoluteOperand(instAddr):X4},X";
-        private string DisassembleAbsoluteY(ushort instAddr) => $" ${PeekAbsoluteOperand(instAddr):X4},Y";
-        private string DisassembleZeroPage(ushort instAddr) => $" ${PeekZeroPageOperand(instAddr):X2}";
-        private string DisassembleZeroPageX(ushort instAddr) => $" ${PeekZeroPageOperand(instAddr):X2},X";
-        private string DisassembleZeroPageY(ushort instAddr) => $" ${PeekZeroPageOperand(instAddr):X2},Y";
-        private string DisassembleIndirect(ushort instAddr) => $" (${PeekAbsoluteOperand(instAddr):X4})";
-        private string DisassembleIndexedIndirectX(ushort instAddr) => $" (${PeekZeroPageOperand(instAddr):X2},X)";
-        private string DisassembleIndirectIndexedY(ushort instAddr) => $" (${PeekZeroPageOperand(instAddr):X2}),Y";
-        private string DisassembleRelative(ushort instAddr) => $" ${PeekRelativeOperand(instAddr):X4}";
-        private string DisassembleAccumulator(ushort instAddr) => $" A";
+        private string PeekByte(ushort addr) => $"{mem.Peek(addr, 0):X2}      ";
+        private string Peek2Bytes(ushort addr) => $"{mem.Peek(addr, 0):X2} {mem.Peek(PC, 1):X2}   ";
+        private string Peek3Bytes(ushort addr) => $"{mem.Peek(addr, 0):X2} {mem.Peek(PC, 1):X2} {mem.Peek(PC, 2):X2}";
 
-        private ushort PeekImmediateOperand(ushort instAddr) => mem.Peek(instAddr, 1);
+        private byte PeekImmediateOperand(ushort instAddr) => mem.Peek(instAddr, 1);
         private ushort PeekAbsoluteOperand(ushort instAddr) => Addr(mem.Peek(instAddr, 1), mem.Peek(instAddr, 2));
-        private ushort PeekZeroPageOperand(ushort instAddr) => mem.Peek(instAddr, 1);
-        private ushort PeekRelativeOperand(ushort instAddr) => Addr(mem.Peek(instAddr, 1), mem.Peek(instAddr, 2));
+        private byte PeekZeroPageOperand(ushort instAddr) => mem.Peek(instAddr, 1);
+        private ushort PeekRelativeOperand(ushort instAddr) => (ushort)((instAddr + 2) + (sbyte)mem.Peek(instAddr, 1));
+
+        private string DisassembleImplied(string inst, ushort instAddr) => $"{PeekByte(instAddr)} {inst}";
+        private string DisassembleImmediate(string inst, ushort instAddr) => $"{Peek2Bytes(instAddr)} {inst} #${PeekImmediateOperand(instAddr):X2}";
+        private string DisassembleAbsolute(string inst, ushort instAddr) => $"{Peek3Bytes(instAddr)} {inst} ${PeekAbsoluteOperand(instAddr):X4}";
+        private string DisassembleAbsoluteX(string inst, ushort instAddr) => $"{Peek3Bytes(instAddr)} {inst} ${PeekAbsoluteOperand(instAddr):X4},X";
+        private string DisassembleAbsoluteY(string inst, ushort instAddr) => $"{Peek3Bytes(instAddr)} {inst} ${PeekAbsoluteOperand(instAddr):X4},Y";
+        private string DisassembleZeroPage(string inst, ushort instAddr) => $"{Peek2Bytes(instAddr)} {inst} ${PeekZeroPageOperand(instAddr):X2}";
+        private string DisassembleZeroPageX(string inst, ushort instAddr) => $"{Peek2Bytes(instAddr)} {inst} ${PeekZeroPageOperand(instAddr):X2},X";
+        private string DisassembleZeroPageY(string inst, ushort instAddr) => $"{Peek2Bytes(instAddr)} {inst} ${PeekZeroPageOperand(instAddr):X2},Y";
+        private string DisassembleIndirect(string inst, ushort instAddr) => $"{Peek3Bytes(instAddr)} {inst} (${PeekAbsoluteOperand(instAddr):X4})";
+        private string DisassembleIndexedIndirectX(string inst, ushort instAddr) => $"{Peek2Bytes(instAddr)} {inst} (${PeekZeroPageOperand(instAddr):X2},X)";
+        private string DisassembleIndirectIndexedY(string inst, ushort instAddr) => $"{Peek2Bytes(instAddr)} {inst} (${PeekZeroPageOperand(instAddr):X2}),Y";
+        private string DisassembleRelative(string inst, ushort instAddr) => $"{Peek2Bytes(instAddr)} {inst} ${PeekRelativeOperand(instAddr):X4}";
+        private string DisassembleAccumulator(string inst, ushort instAddr) => $"{PeekByte(instAddr)} {inst} A";
+
+        private ushort FollowIndirectAbsoluteAddrPeek(ushort addr) => Addr(mem.Peek(addr), mem.Peek(NextPageAddr(addr)));   // 6502 bug: indirect wraps at page
+        private ushort FollowIndirectZeroPageAddrPeek(byte addr) => Addr(mem.Peek(addr), mem.Peek((byte)(addr + 1)));
+
+        private string LogValue(ushort addr) => $" = {mem.Peek(addr):X2}";
+        private string LogAbsoluteAddr(ushort addr) => $" = {FollowIndirectAbsoluteAddrPeek(addr):X4}";
+        private string LogZeroPageAddr(byte addr) => $" = {FollowIndirectZeroPageAddrPeek(addr):X4}";
+        private string LogZeroPageAddrValue(byte addr) => $" = {mem.Peek(FollowIndirectZeroPageAddrPeek(addr)):X2}";
+        private string LogIndexedValue(ushort addr) => $" @ {addr:X4}{LogValue(addr)}";
+
+        private string LogAbsoluteValue(ushort instAddr) => LogValue(PeekAbsoluteOperand(instAddr));
+        private string LogAbsoluteXValue(ushort instAddr) => LogIndexedValue((ushort)(PeekAbsoluteOperand(instAddr) + X));
+        private string LogAbsoluteYValue(ushort instAddr) => LogIndexedValue((ushort)(PeekAbsoluteOperand(instAddr) + Y));
+        private string LogZeroPageValue(ushort instAddr) => LogValue(PeekZeroPageOperand(instAddr));
+        private string LogZeroPageIndexedValue(byte addr) => $" @ {addr:X2}{LogValue(addr)}";
+        private string LogZeroPageXValue(ushort instAddr) => LogZeroPageIndexedValue((byte)(PeekZeroPageOperand(instAddr) + X));
+        private string LogZeroPageYValue(ushort instAddr) => LogZeroPageIndexedValue((byte)(PeekZeroPageOperand(instAddr) + Y));
+        private string LogIndirectValue(ushort instAddr) => LogAbsoluteAddr(PeekAbsoluteOperand(instAddr));
+        private string LogIndexedIndirectValue(byte addr) => $" @ {addr:X2}{LogZeroPageAddr(addr)}{LogZeroPageAddrValue(addr)}";
+        private string LogIndexedIndirectXValue(ushort instAddr) => LogIndexedIndirectValue((byte)(PeekZeroPageOperand(instAddr) + X));
+        private string LogIndirectIndexedValue(byte addr, int offset) => $"{LogZeroPageAddr(addr)}{LogIndexedValue((ushort)(FollowIndirectZeroPageAddrPeek(addr) + offset))}";
+        private string LogIndirectIndexedYValue(ushort instAddr) => LogIndirectIndexedValue(PeekZeroPageOperand(instAddr), Y);
     }
 
     static class BitHelpers
@@ -1156,6 +1149,8 @@ namespace Faminet.Emulator
         public static byte AsBits(this (bool b7, bool b6, bool b5, bool b4, bool b3, bool b2, bool b1, bool b0) b) =>
             (byte)(b.b7.AsBit(7) + b.b6.AsBit(6) + b.b5.AsBit(5) + b.b4.AsBit(4) +
                    b.b3.AsBit(3) + b.b2.AsBit(2) + b.b1.AsBit(1) + b.b0.AsBit(0));
+
+        public static string AsLetter(this bool b, string letter) => b ? letter.ToUpperInvariant() : letter.ToLowerInvariant();
 
         public static bool IsBitSet(this byte b, int bit) => (b & (1 << bit)) != 0;
         public static (bool b7, bool b6, bool b5, bool b4, bool b3, bool b2, bool b1, bool b0) GetBits(this byte b) =>

@@ -12,13 +12,15 @@ namespace Faminet.Emulator
 
         // Mapped cartridge memory (fixed mapping for now):
         private readonly byte[] prgRom;                          // Starts at $8000 (mirrors to $FFFF)
+        private readonly byte[] prgRam;                          // Starts at $6000 (mirrors to $7FFF)
 
         private readonly int mapper;
 
-        public CPUMemoryMap(int mapper, byte[] prgRom)
+        public CPUMemoryMap(int mapper, byte[] prgRom, byte[] chrRom, byte[] prgRam)
         {
             this.mapper = mapper;
             this.prgRom = prgRom;
+            this.prgRam = prgRam;
         }
 
         public byte Read(ushort addr)
@@ -37,6 +39,11 @@ namespace Faminet.Emulator
                 return apuIoReg[addr - 0x4000];
             else if (addr >= 0x8000)
                 return prgRom[addr % prgRom.Length];
+            else if (addr >= 0x6000)
+                if (prgRam != null)
+                    return prgRam[addr % prgRam.Length];
+                else
+                    throw new IndexOutOfRangeException();
             else
                 throw new IndexOutOfRangeException();
         }
@@ -53,6 +60,11 @@ namespace Faminet.Emulator
                 apuIoReg[addr - 0x4000] = b;            // TODO: Special APU/IO write handling
             else if (addr >= 0x8000)
                 throw new IndexOutOfRangeException();   // PRG ROM is readonly
+            else if (addr >= 0x6000)
+                if (prgRam != null)
+                    prgRam[addr % prgRam.Length] = b;
+                else
+                    throw new IndexOutOfRangeException();
             else
                 throw new IndexOutOfRangeException();
         }

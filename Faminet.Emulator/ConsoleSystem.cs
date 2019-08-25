@@ -12,9 +12,9 @@ namespace Faminet.Emulator
         public CPUMemoryMap Memory { get; private set; }
         public CPU CPU { get; private set; }
 
-        public ConsoleSystem(int mapper, byte[] prgRom)
+        public ConsoleSystem(int mapper, byte[] prgRom, byte[] chrRom, byte[] prgRam)
         {
-            Memory = new CPUMemoryMap(mapper, prgRom);
+            Memory = new CPUMemoryMap(mapper, prgRom, chrRom, prgRam);
             CPU = new CPU(Memory);
         }
 
@@ -33,23 +33,36 @@ namespace Faminet.Emulator
             using (var reader = new BinaryReader(stream))
             {
                 var magic = reader.ReadBytes(4);
-                if (magic[0] != 0x4E || magic[1] != 0x45 || magic[2] != 0x53 || magic[3] != 0x1A)
+                if (magic[0] != 'N' || magic[1] != 'E' || magic[2] != 'S' || magic[3] != 0x1A)
                 {
                     throw new FileFormatException();
                 }
                 var prgRomSize = reader.ReadByte();
                 var chrRomSize = reader.ReadByte();
                 var flags6 = reader.ReadByte();
-                var mapper = flags6 >> 4;
-                if (mapper != 0)
+                var flags7 = reader.ReadByte();
+                var mapper = flags6 >> 4 + ((flags7 >> 4) << 4);
+                var hasPrgRam = true;   // Hack for now to run test roms   // flags6.IsBitSet(1);
+                var padding = reader.ReadBytes(8);
+                byte[] prgRom;
+                byte[] chrRom;
+                byte[] prgRam;
+                switch (mapper)
                 {
-                    throw new NotSupportedException();
-                }
-                var padding = reader.ReadBytes(9);
-                var prgRom = reader.ReadBytes(0x4000 * prgRomSize);
-                var chrRom = reader.ReadBytes(0x2000 * chrRomSize);
+                    case 0:
+                        prgRom = reader.ReadBytes(0x4000 * prgRomSize);
+                        chrRom = reader.ReadBytes(0x2000 * chrRomSize);
+                        if (hasPrgRam)
+                            prgRam = new byte[0x2000];
+                        else
+                            prgRam = null;
+                        break;
 
-                return new ConsoleSystem(mapper, prgRom);
+                    default:
+                        throw new NotSupportedException();
+                }
+
+                return new ConsoleSystem(mapper, prgRom, chrRom, prgRam);
             }
         }
     }
