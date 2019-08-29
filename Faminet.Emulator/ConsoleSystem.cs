@@ -18,12 +18,15 @@ namespace Faminet.Emulator
             CPU = new CPU(Memory);
         }
 
+        public Func<bool> ShouldHalt = null;
+
         public void Run()
         {
             bool halt;
             do
             {
                 halt = CPU.Step();
+                halt |= (ShouldHalt?.Invoke() ?? false);
             } while (!halt);
             Debug.WriteLine("Halting.");
         }

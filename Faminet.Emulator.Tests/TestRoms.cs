@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Linq;
+using System.Text;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -15,18 +17,35 @@ namespace Faminet.Emulator.Tests
         }
 
         [Theory]
-        [InlineData("01-implied.nes")]
+        [InlineData(@"registers.nes")]
+        public void cpu_reset(string subtest)
+        {
+            blarggTest($@"cpu_reset\{subtest}");
+        }
+
+        [Theory]
+        [InlineData(@"01-implied.nes")]
         public void instr_test(string subtest)
         {
-            var stream = File.OpenRead($@".\nes-test-roms\instr_test-v3\rom_singles\{subtest}");
+            blarggTest($@"nes_instr_test\rom_singles\{subtest}");
+        }
+
+        private void blarggTest(string testPath)
+        {
+            var stream = File.OpenRead($@".\nes-test-roms\{testPath}");
             ConsoleSystem console = ConsoleSystem.LoadFromInesStream(stream);
             console.CPU.LogWriteAction = output.WriteLine;
 
-            // Run until CPU halts:
+            // Run until test completes:
+            var continueStatuses = new byte[] { 0x00, 0x80 };
+            console.ShouldHalt = () =>
+                (console.Memory.Peek(0x6001) != 0x00) &&                    // test started?
+                !continueStatuses.Contains(console.Memory.Peek(0x6000));    // test not finished?
             console.Run();
 
             // Ensure that all tests passed:
-            output.WriteLine($"$6000: {console.Memory.Peek(0x6000):X4}");
+            output.WriteLine($"$6000: {console.Memory.Peek(0x6000):X2}");
+            output.WriteLine($"$6004: {console.Memory.PeekString(0x6004)}");
             Assert.Equal(0, console.Memory.Peek(0x6000));
         }
 
@@ -47,6 +66,22 @@ namespace Faminet.Emulator.Tests
             output.WriteLine($"$02: {console.Memory.Peek(0x02):X2} $03: {console.Memory.Peek(0x03):X2}");
             Assert.Equal(0, console.Memory.Peek(0x02));
             Assert.Equal(0, console.Memory.Peek(0x03));
+        }
+    }
+
+    public static class TestHelpers
+    {
+        public static string PeekString(this CPUMemoryMap mem, ushort addr)
+        {
+            var builder = new StringBuilder();
+
+            char ch;
+            while ((ch = (char)mem.Peek(addr++)) != 0)
+            {
+                builder.Append(ch);
+            }
+
+            return builder.ToString();
         }
     }
 }
