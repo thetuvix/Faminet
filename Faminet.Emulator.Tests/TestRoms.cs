@@ -34,7 +34,7 @@ namespace Faminet.Emulator.Tests
         {
             var stream = File.OpenRead($@".\nes-test-roms\{testPath}");
             ConsoleSystem console = ConsoleSystem.LoadFromInesStream(stream);
-            console.CPU.LogWriteAction = output.WriteLine;
+            console.LogWriteLineAction = output.WriteLine;
 
             // Run until test completes:
             var continueStatuses = new byte[] { 0x00, 0x80 };
@@ -52,9 +52,9 @@ namespace Faminet.Emulator.Tests
         [Fact]
         public void nestest()
         {
-            var stream = File.OpenRead(@".\nes-test-roms/other/nestest.nes");
+            var stream = File.OpenRead(@".\nes-test-roms\other\nestest.nes");
             ConsoleSystem console = ConsoleSystem.LoadFromInesStream(stream);
-            console.CPU.LogWriteAction = output.WriteLine;
+            console.LogWriteLineAction = output.WriteLine;
 
             // Jump to "automation mode" address:
             console.CPU.Jump(0xC000);

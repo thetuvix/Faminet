@@ -11,11 +11,13 @@ namespace Faminet.Emulator
     {
         public CPUMemoryMap Memory { get; private set; }
         public CPU CPU { get; private set; }
+        public PPU PPU { get; private set; }
 
         public ConsoleSystem(int mapper, byte[] prgRom, byte[] chrRom, byte[] prgRam)
         {
             Memory = new CPUMemoryMap(mapper, prgRom, chrRom, prgRam);
             CPU = new CPU(Memory);
+            PPU = new PPU();
         }
 
         public Func<bool> ShouldHalt = null;
@@ -25,11 +27,24 @@ namespace Faminet.Emulator
             bool halt;
             do
             {
+                LogLine($"{CPU.StateAsString} {PPU.StateAsString}");
+                var cpuCycleBefore = CPU.Cycle;
                 halt = CPU.Step();
+                PPU.StepCycles((int)(CPU.Cycle - cpuCycleBefore) * 3);
                 halt |= (ShouldHalt?.Invoke() ?? false);
             } while (!halt);
             Debug.WriteLine("Halting.");
         }
+
+        public Action<string> LogWriteLineAction { get; set; }
+
+        [Conditional("DEBUG")]
+        void LogLine(string message)
+        {
+            Debug.WriteLine(message);
+            LogWriteLineAction?.Invoke(message);
+        }
+
 
         public static ConsoleSystem LoadFromInesStream(Stream stream)
         {
